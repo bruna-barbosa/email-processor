@@ -745,6 +745,13 @@ debug(f"Error handling variables initiated... Filename = {filename}, Relevant da
 
 # Iterate through email IDs
 for emailid in items:
+    # Initialize variables for error handling
+    mailbody_content = ""
+    error_handler = ErrorHandler()
+    filename = None
+    relevant_data = None
+    attachment_found = False
+    debug(f"Error handling variables initiated: Filename = {filename}, Relevant data = {relevant_data}, Attachment found = {attachment_found}...")
     debug("For emailid loop initiated... Fetching and parsing email data...")
 
     # Fetch email data and parse it
@@ -765,8 +772,8 @@ for emailid in items:
         # Iterate through parts of the email
         for part in mail.walk():
             if part.get_content_maintype() == 'multipart':
-                debug("Attachment found.")
                 attachment_found = True
+                debug(f"Attachment found = {attachment_found}")
                 continue
 
             # Skip non-attachment parts
@@ -774,44 +781,43 @@ for emailid in items:
                 continue
             
             filename = part.get_filename()
-            debug(f'The filename is: {filename}.')
-            debug(f"Variable 'frm' is: {frm}.")      
+            debug(f'The filename is: {filename}.')                 
         
     # Iterate through parts of the email again to find HTML content
-    for part in mail.walk(): 
-        if part.get_content_type() == "text/html" and not attachment_found:
-            # Extract and preprocess the HTML content of the email
-            relevant_data = extract_email_body_and_preprocess(part)
-        
-        if relevant_data:
-            debug("Relevant data found in email body...")
-            # Call the function to convert and zip the relevant data
-            zip_filepath = convert_and_zip_relevant_data(relevant_data, detach_dir, subject)
+    elif filename is None and not attachment_found:
+        for part in mail.walk(): 
+            if part.get_content_type() == "text/html" and not attachment_found:
+                # Extract and preprocess the HTML content of the email
+                if extract_email_body_and_preprocess(part):
+                    relevant_data = extract_email_body_and_preprocess(part)
+            
+            if relevant_data is not None and getheader4table:
+                debug("Relevant data found in email body...")
+                # Call the function to convert and zip the relevant data
+                zip_filepath = convert_and_zip_relevant_data(relevant_data, detach_dir, subject)
 
-            if zip_filepath:                               
-                # Delete the email from the server after successful ZIP file generation
-                if delete_email_from_server(emailid, authenticate_imap(conf)):
-                    log(f"Email with relevant data from {sender} deleted after zip file was generated successfully.")
-                    sys.exit()
+                if zip_filepath:                               
+                    # Delete the email from the server after successful ZIP file generation
+                    if delete_email_from_server(emailid, authenticate_imap(conf)):
+                        log(f"Email with relevant data from {sender} deleted after zip file was generated successfully.")
+                        sys.exit()
+                    else:
+                        debug(f"Email from {sender} with ID {emailid} already deleted.")
                 else:
-                    debug(f"Email from {sender} with ID {emailid} already deleted.")
-            else:
-                debug("No zip filepath found by the script. No files were imported.")
+                    debug("No zip filepath found by the script. No files were imported.")
         
 
-# Rest of the code for processing other cases    
+    # Rest of the code for processing other cases    
     # Get the sender's email address and verify its validity
     sender = get_allowed_sender(filename, frm, emailid, subject, M)
 
-    if sender:
+    if filename is not None and get_allowed_sender(filename, frm, emailid, subject, M):
         debug(f"The verified and validated sender email address is: {sender}")
         continue
     else:
-        log(f"The sender email address ({sender}) is invalid or from an unauthorized domain.")
-
-    # Handle empty emails / without attachments
-    if filename is None:
-        debug(f"Inform sender function value before calling is {inform_sender_about_errors(filename, sender, subject, mailbody_content, error_handler=error_handler)}")
+        log(f"The sender email address ({sender}) is invalid for file processing.")
+        
+        # Handle empty emails / without attachments           
         ErrorHandler.add_error_message(
             "The previously sent email contains no content or recognized filename."
         )
@@ -841,8 +847,11 @@ for emailid in items:
             debug(f"Informing sender unsuccessful: Error while sending email to {sender}.")
             sys.exit()
 
-    # Handle allowed file extensions in case email contains attachments
-    elif filename is not None:
+    ### Handle allowed file extensions in case email contains attachments        
+        debug(f"Filename is {filename}, which means attachment found = {attachment_found}")
+
+    if filename is not None and attachment_found:
+        debug("Checking file extension validity...")
         # List of invalid and valid file extensions
         invalid_extensions = [".png", ".jpeg", ".jpg"]
         valid_extensions = [".xls", ".xlsx", ".zip", ".csv"]
@@ -880,86 +889,86 @@ for emailid in items:
                     debug(f"Email from {sender} already deleted.")
                     sys.exit()
 
-    try:
-        debug("Running TRY statement.")
-        # If there are valid attachments present in the email, they will be processed here
-        # 2023-08-02 Klaus: used V2 
-        if relevant_data is None and check_sender_and_filename_V2(filename, sender):
-            debug("No tables found in email body. Continuing script.")
-            filename = insert_datetime(filename)
-            debug(f"The updated filename is: {filename}.")
-            att_path = os.path.join(detach_dir, filename)  # /Input/Filename
+        try:
+            debug("Running TRY statement.")
+            # If there are valid attachments present in the email, they will be processed here
+            # 2023-08-02 Klaus: used V2 
+            if relevant_data is None and attachment_found and check_sender_and_filename_V2(filename, sender):
+                debug("No tables found in email body. Continuing script.")
+                filename = insert_datetime(filename)
+                debug(f"The updated filename is: {filename}.")
+                att_path = os.path.join(detach_dir, filename)  # /Input/Filename
 
-            # Check if it already exists in this path
-            if not os.path.isfile(att_path):
-                # Write the file onto the Input folder
-                fp = open(att_path, "wb")
-                fp.write(part.get_payload(decode=True))
-                fp.close()
-                debug("The script inserted the file onto the input folder.")
-                log(f"Script completed successfully: file ({filename}) from {sender} uploaded.")
-                if delete_email_from_server(emailid, authenticate_imap(conf)):
-                    debug(f"Email from {sender} deleted.")
+                # Check if it already exists in this path
+                if not os.path.isfile(att_path):
+                    # Write the file onto the Input folder
+                    fp = open(att_path, "wb")
+                    fp.write(part.get_payload(decode=True))
+                    fp.close()
+                    debug("The script inserted the file onto the input folder.")
+                    log(f"Script completed successfully: file ({filename}) from {sender} uploaded.")
+                    if delete_email_from_server(emailid, authenticate_imap(conf)):
+                        debug(f"Email from {sender} deleted.")
 
-        elif not check_sender_and_filename_V2(filename, sender):
-            debug("Sender is not authorized to send the file as it is not an allowed sender.")
-           
-            ErrorHandler.add_error_message(f"Sender is not authorized to send the file ({filename}) provided as it is not an allowed sender."
+            elif not check_sender_and_filename_V2(filename, sender):
+                debug("Sender is not authorized to send the file as it is not an allowed sender.")
+            
+                ErrorHandler.add_error_message(f"Sender is not authorized to send the file ({filename}) provided as it is not an allowed sender."
+                )
+                mailbody_content = ErrorHandler.get_mailbody_content()
+
+                debug(f"Inform sender function value before calling is {inform_sender_about_errors(filename, sender, subject, mailbody_content, error_handler=error_handler)}")
+
+                # Call inform_sender_about_errors with the updated mailbody_content
+                if inform_sender_about_errors(
+                    filename, sender, subject, mailbody_content, error_handler=error_handler
+                ):
+                    log(f"Error in files ({filename}), sent from {sender}. This email is not an allowed sender.")
+                    debug(f"Error in files sent from {sender}. This email is not an allowed sender.")
+                    debug(f"Inform sender function value after calling is {inform_sender_about_errors(filename, sender, subject, mailbody_content, error_handler=error_handler)}")
+
+                    # Delete the email from the server after the error message has been sent successfully
+                    delete_flag = delete_email_from_server(emailid, authenticate_imap(conf))
+                    if delete_flag:
+                        log(f"Invalid email from {sender} deleted.")
+                        sys.exit()
+                    else:
+                        debug(f"Email from {sender} already deleted.")
+                        sys.exit()
+
+                elif not inform_sender_about_errors(
+                    filename, sender, subject, mailbody_content, error_handler=error_handler
+                ):
+                    log(f"Informing sender unsuccessful: Error in sending email to {sender}.")
+                    debug(f"Informing sender unsuccessful: Error in sending email to {sender}.")
+
+                    if delete_email_from_server(emailid, authenticate_imap(conf)):
+                        log(f"Email from {sender} deleted.")
+                    else:
+                        log(f"Email from {sender} with ID {emailid} already deleted.")
+                        sys.exit()
+
+        except Exception as e:
+            debug("The script raised the except statement.")
+            ErrorHandler.add_error_message(
+                f"It seems {sender} is not an allowed sender for {filename}. <br><br> <i><b>If you are an allowed sender:</b> there may be errors present in the filename. <br> Please try renaming the file you are trying to import in a text editor before attempting to upload again.</i>"
             )
             mailbody_content = ErrorHandler.get_mailbody_content()
+            debug(f"inform_sender_about_errors() value before calling is {inform_sender_about_errors(filename, sender, subject, mailbody_content, error_handler=error_handler)}")
 
-            debug(f"Inform sender function value before calling is {inform_sender_about_errors(filename, sender, subject, mailbody_content, error_handler=error_handler)}")
-
-            # Call inform_sender_about_errors with the updated mailbody_content
             if inform_sender_about_errors(
                 filename, sender, subject, mailbody_content, error_handler=error_handler
             ):
-                log(f"Error in files ({filename}), sent from {sender}. This email is not an allowed sender.")
-                debug(f"Error in files sent from {sender}. This email is not an allowed sender.")
+                debug(f"Error in files ({filename}), sent from {sender}. Function inform_sender_about_errors() was executed.")
                 debug(f"Inform sender function value after calling is {inform_sender_about_errors(filename, sender, subject, mailbody_content, error_handler=error_handler)}")
 
-                # Delete the email from the server after the error message has been sent successfully
-                delete_flag = delete_email_from_server(emailid, authenticate_imap(conf))
-                if delete_flag:
-                    log(f"Invalid email from {sender} deleted.")
-                    sys.exit()
-                else:
-                    debug(f"Email from {sender} already deleted.")
-                    sys.exit()
-
-            elif not inform_sender_about_errors(
-                filename, sender, subject, mailbody_content, error_handler=error_handler
-            ):
-                log(f"Informing sender unsuccessful: Error in sending email to {sender}.")
-                debug(f"Informing sender unsuccessful: Error in sending email to {sender}.")
-
                 if delete_email_from_server(emailid, authenticate_imap(conf)):
-                    log(f"Email from {sender} deleted.")
-                else:
-                    log(f"Email from {sender} with ID {emailid} already deleted.")
-                    sys.exit()
-
-    except Exception as e:
-        debug("The script raised the except statement.")
-        ErrorHandler.add_error_message(
-            f"It seems {sender} is not an allowed sender for {filename}. <br><br> <i><b>If you are an allowed sender:</b> there may be errors present in the filename. <br> Please try renaming the file you are trying to import in a text editor before attempting to upload again.</i>"
-        )
-        mailbody_content = ErrorHandler.get_mailbody_content()
-        debug(f"inform_sender_about_errors() value before calling is {inform_sender_about_errors(filename, sender, subject, mailbody_content, error_handler=error_handler)}")
-
-        if inform_sender_about_errors(
-            filename, sender, subject, mailbody_content, error_handler=error_handler
-        ):
-            debug(f"Error in files ({filename}), sent from {sender}. Function inform_sender_about_errors() was executed.")
-            debug(f"Inform sender function value after calling is {inform_sender_about_errors(filename, sender, subject, mailbody_content, error_handler=error_handler)}")
-
-            if delete_email_from_server(emailid, authenticate_imap(conf)):
-                log(f"Error present in attachments. Email from {sender} deleted.")
-        else:
-            log(
-                f"Error deleting email from {sender} and informing sender, with ID {emailid}."
-            )
-            sys.exit()
+                    log(f"Error present in attachments. Email from {sender} deleted.")
+            else:
+                log(
+                    f"Error deleting email from {sender} and informing sender, with ID {emailid}."
+                )
+                sys.exit()
 
 # Printing script completion
 debug("The script was completed successfully.")
