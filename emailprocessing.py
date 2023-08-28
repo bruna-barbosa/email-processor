@@ -882,8 +882,26 @@ for emailid in items:
 
     try:
         debug("Running TRY statement.")
+        # If there are valid attachments present in the email, they will be processed here
+        # 2023-08-02 Klaus: used V2 
+        if relevant_data is None and check_sender_and_filename_V2(filename, sender):
+            debug("No tables found in email body. Continuing script.")
+            filename = insert_datetime(filename)
+            debug(f"The updated filename is: {filename}.")
+            att_path = os.path.join(detach_dir, filename)  # /Input/Filename
 
-        if not check_sender_and_filename_V2(filename, sender):
+            # Check if it already exists in this path
+            if not os.path.isfile(att_path):
+                # Write the file onto the Input folder
+                fp = open(att_path, "wb")
+                fp.write(part.get_payload(decode=True))
+                fp.close()
+                debug("The script inserted the file onto the input folder.")
+                log(f"Script completed successfully: file ({filename}) from {sender} uploaded.")
+                if delete_email_from_server(emailid, authenticate_imap(conf)):
+                    debug(f"Email from {sender} deleted.")
+
+        elif not check_sender_and_filename_V2(filename, sender):
             debug("Sender is not authorized to send the file as it is not an allowed sender.")
            
             ErrorHandler.add_error_message(f"Sender is not authorized to send the file ({filename}) provided as it is not an allowed sender."
